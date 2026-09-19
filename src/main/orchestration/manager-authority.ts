@@ -112,7 +112,7 @@ export function assignManagerForPrime(caller: Caller, managerAgentId: string): P
   return enqueueAuthority(async () => {
     if (!caller.conversationId) throw new IdentityLostError();
     const status = statusForCaller(caller);
-    if (!status.self || self.id !== PRIME_ID) {
+    if (!status.self || status.self.id !== PRIME_ID) {
       throw new AgentError('MANAGER_ASSIGNMENT_DENIED: only the proven Prime conversation may designate a Manager.');
     }
     const target = status.state.agents.find((agent) => agent.id === managerAgentId);
