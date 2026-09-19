@@ -30,7 +30,7 @@ export interface AgentSystemAgentStatus {
 
 export interface AgentSystemStatus {
   observedAt: number;
-  recoveryPolicy: 'safe';
+  recoveryPolicy: 'off' | 'safe';
   runId: string;
   planId: string | null;
   managerAgentId: string;
