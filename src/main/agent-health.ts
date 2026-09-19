@@ -190,7 +190,7 @@ export function evaluateAgentHealth(input: AgentHealthInput, observedAt: number)
         observedAt,
         activity,
         'stalled',
-        'restart',
+        'wake',
         `Detached worker has had no browser view for at least ${AGENT_DETACHED_RECOVERY_GRACE_MS} ms.`
       );
     }
