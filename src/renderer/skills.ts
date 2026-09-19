@@ -126,7 +126,9 @@ export function initSkills(options: Options) {
       { command: 'plan', name: 'Plan', description: 'Turn the next composer request into editable stages.', glyph: 'i-steps' },
       { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
       { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
-      { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' }
+      { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' },
+      { command: 'team', name: 'Team', description: 'Set up Agent System 3.0 with a Manager, task graph, workers and review.', glyph: 'i-bolt' },
+      { command: 'autopilot', name: 'Autopilot', description: 'Switch to Loop and keep executing the current objective autonomously.', glyph: 'i-loop' }
     ].filter(row => row.command.includes(query)) : [];
     choices = [...commands, ...(loading && !library ? [] : filtered(query).slice(0, 64))];
     selected = Math.min(selected, Math.max(0, choices.length - 1)); painted = selectionKey();
