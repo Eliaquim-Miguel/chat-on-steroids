@@ -16,7 +16,7 @@ function status(): AgentSystemStatus {
       {
         id: 'worker-1', label: 'stalled', state: 'detached', active: true,
         conversationId: 'conversation-one', activity: 'waiting', health: 'stalled',
-        recommendedAction: 'restart', healthReason: 'detached beyond recovery grace',
+        recommendedAction: 'wake', healthReason: 'detached beyond recovery grace',
         roles: ['worker', 'manager'], pending: 0, awaitingAck: 0, lastSeenAt: Date.now() - 60_000
       },
       {
