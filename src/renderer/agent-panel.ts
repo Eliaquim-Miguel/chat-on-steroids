@@ -79,6 +79,22 @@ export function createAgentPanel(options: {
       el('div', 'agent-control-stat', () => `${progress}%`)
     );
     const meta = el('p', 'meta', `Manager: ${status.managerAgentId} · ${status.runStatus === 'RUN_VERIFIED' ? 'verified' : 'running'}`);
+    const agents = el('div', 'agent-control-agents');
+    agents.append(el('h3', '', () => `Agents · ${status.agents.length}`));
+    for (const agent of status.agents) {
+      const row = el('div', 'agent-control-agent');
+      const copy = el('div', 'agent-control-task-copy');
+      copy.append(
+        el('strong', '', agent.label),
+        el('span', 'meta', () => [agent.id, agent.roles.join('/'), agent.activity.replaceAll('_', ' ')].filter(Boolean).join(' · '))
+      );
+      const health = el('span', 'agent-control-health', agent.health);
+      health.dataset.health = agent.health;
+      health.title = agent.healthReason;
+      row.append(copy, health);
+      agents.append(row);
+    }
+
     const tasks = el('div', 'agent-control-tasks');
     tasks.append(el('h3', '', () => `Tasks · ${status.tasks.length}`));
     for (const task of status.tasks) {
@@ -93,7 +109,10 @@ export function createAgentPanel(options: {
       row.append(text, state);
       tasks.append(row);
     }
-    body.replaceChildren(summary, meta, tasks);
+    const policy = el('p', 'meta', () => status.recoveryPolicy === 'off'
+      ? 'Health is observer-only · automatic recovery is off'
+      : `Recovery policy: ${status.recoveryPolicy}`);
+    body.replaceChildren(summary, meta, policy, agents, tasks);
   }
 
   async function open(id: string, refresh = false): Promise<void> {

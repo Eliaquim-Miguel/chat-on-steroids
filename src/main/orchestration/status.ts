@@ -1,4 +1,7 @@
 import { AgentError, PRIME_ID, agentConversation, statusForCaller, type Caller, type CallerSwarmStatus } from '../agents.js';
+import { collectAgentHealthEvidence, evaluateAgentHealth } from '../agent-health.js';
+import { runningToolCalls } from '../mcp/call-context.js';
+import { liveConversations } from '../session/recorder.js';
 import type { AgentSystemStatus } from '../../shared/agent-system.js';
 import { managerRuntimeForRun } from './manager-authority.js';
 import { recoverOrchestrationState } from './recovery.js';
@@ -14,6 +17,7 @@ async function projectStatus(
     throw new AgentError('CONTROL_CENTER_RUN_CHANGED: orchestration authority changed while status was being read.');
   }
   const workflow = await workflowStateForRun(runId);
+  const observedAt = Date.now();
   const tasks = Object.values(recovered.state.tasks).map((task) => {
     const wt = task.worktreeId ? recovered.state.worktrees[task.worktreeId] : null;
     const verification = workflow?.verifications?.[task.taskId] ?? [];
@@ -35,6 +39,15 @@ async function projectStatus(
     };
   });
 
+  const blockedAgentIds = new Set<string>();
+  for (const task of tasks) {
+    if (task.state !== 'BLOCKED' && task.state !== 'FAILED') continue;
+    if (task.assignedWorkerId) blockedAgentIds.add(task.assignedWorkerId);
+    if (task.reviewerId) blockedAgentIds.add(task.reviewerId);
+  }
+  if (workflow?.status === 'blocked') blockedAgentIds.add(managerAgentId);
+
+  const liveByConversation = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
   const agents = broker.state.agents.map((agent) => {
     const roles = new Set<string>([agent.role]);
     if (agent.id === managerAgentId) roles.add('manager');
