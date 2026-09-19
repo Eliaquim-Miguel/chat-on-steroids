@@ -25,7 +25,7 @@ export async function recoverStalledAgents(
   for (const agent of status.agents) {
     if (
       agent.health !== 'stalled' ||
-      (agent.recommendedAction !== 'retry' && agent.recommendedAction !== 'restart') ||
+      (agent.recommendedAction !== 'wake' && agent.recommendedAction !== 'retry_delivery') ||
       !agent.conversationId ||
       !agent.roles.includes('worker')
     ) continue;
