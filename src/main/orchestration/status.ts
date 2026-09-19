@@ -55,11 +55,36 @@ async function projectStatus(
       if (task.assignedWorkerId === agent.id) roles.add('worker');
       if (task.reviewerId === agent.id) roles.add('reviewer');
     }
+
+    const live = agent.conversationId ? liveByConversation.get(agent.conversationId) ?? null : null;
+    const evidence = collectAgentHealthEvidence({
+      id: agent.id,
+      broker: agent,
+      browser: agent.conversationId
+        ? {
+            agentId: agent.id,
+            conversationId: agent.conversationId,
+            browserPresent: agent.state === 'detached' ? false : null,
+            generating: live?.generating ?? false,
+            activeTurnId: Boolean(live?.activeTurnId),
+            finiteWait: null
+          }
+        : null,
+      runningToolCalls: agent.conversationId ? runningToolCalls(agent.conversationId) : 0,
+      transfer: null,
+      workflowBlocked: blockedAgentIds.has(agent.id)
+    });
+    const projected = evaluateAgentHealth({ id: agent.id, broker: agent, evidence }, observedAt);
+
     return {
       id: agent.id,
       label: agent.label,
       state: agent.state,
       active: ['invited', 'active', 'detached', 'waking'].includes(agent.state),
+      activity: projected.activity,
+      health: projected.health,
+      recommendedAction: projected.recommendedAction,
+      healthReason: projected.reason,
       roles: [...roles],
       pending: agent.pending,
       awaitingAck: agent.awaitingAck,
@@ -68,6 +93,8 @@ async function projectStatus(
   });
 
   return {
+    observedAt,
+    recoveryPolicy: 'off',
     runId,
     planId: recovered.state.managerPlanId,
     managerAgentId,
