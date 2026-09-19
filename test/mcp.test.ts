@@ -829,8 +829,9 @@ describe('surface boundaries', () => {
     // exception for the `cmds` contract that removes whole connector round trips, including
     // the one-shell and per-command-exit semantics. `agents` is the other exception: its description is where the prime learns to write
     // shared context once instead of per worker, to batch messages into one call, and to
-    // hand back RESULT/CHANGES/VALIDATION/BLOCKERS — bytes spent once at discovery to save
-    // a great many in every run that follows.
+    // hand back RESULT/CHANGES/VALIDATION/BLOCKERS. Agent System 3.0 intentionally extends
+    // that same single schema with Manager planning/review actions rather than publishing a
+    // second orchestration tool, so its local ceiling includes that explicit wire contract.
     for (const tool of [...coreTools, ...desktopTools]) {
       const bytes = Buffer.byteLength(JSON.stringify(tool), 'utf8');
       const budget =
@@ -845,7 +846,7 @@ describe('surface boundaries', () => {
           : tool.name === 'apply_patch'
             ? 5_000
             : tool.name === 'agents'
-              ? 3_400
+              ? 5_300
               : tool.name === 'exec_command'
                 // Windows carries `WINDOWS_SHELL_GUIDANCE` in the same description, and that text
                 // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a
