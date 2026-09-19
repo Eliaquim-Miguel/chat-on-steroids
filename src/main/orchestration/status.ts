@@ -79,6 +79,7 @@ async function projectStatus(
     return {
       id: agent.id,
       label: agent.label,
+      conversationId: agent.conversationId,
       state: agent.state,
       active: ['invited', 'active', 'detached', 'waking'].includes(agent.state),
       activity: projected.activity,
@@ -94,7 +95,7 @@ async function projectStatus(
 
   return {
     observedAt,
-    recoveryPolicy: 'off',
+    recoveryPolicy: 'safe',
     runId,
     planId: recovered.state.managerPlanId,
     managerAgentId,

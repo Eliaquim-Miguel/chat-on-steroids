@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectAgentHealthEvidence, evaluateAgentHealth } from '../src/main/agent-health.js';
+import { AGENT_DETACHED_RECOVERY_GRACE_MS, collectAgentHealthEvidence, evaluateAgentHealth } from '../src/main/agent-health.js';
 import type { AgentHealthEvidence, AgentHealthInput } from '../src/shared/agent-health.js';
 import type { AgentInfo, AgentState } from '../src/shared/session.js';
 
@@ -80,9 +80,16 @@ describe('agent health projection', () => {
       .toMatchObject({ activity: 'working', health: 'healthy' });
   });
 
-  it('projects detached agents conservatively', () => {
-    expect(evaluateAgentHealth(input({ browserPresent: false }, { state: 'detached', detachedAt: NOW - 60_000 }), NOW))
+  it('keeps a freshly detached worker observation-only inside the recovery grace', () => {
+    expect(evaluateAgentHealth(input({ browserPresent: false }, { state: 'detached', detachedAt: NOW - 1_000 }), NOW))
       .toMatchObject({ health: 'degraded', recommendedAction: 'observe' });
+  });
+
+  it('promotes an exactly attributed long-detached worker to safe restart recovery', () => {
+    expect(evaluateAgentHealth(input(
+      { browserPresent: false },
+      { state: 'detached', detachedAt: NOW - AGENT_DETACHED_RECOVERY_GRACE_MS - 1 }
+    ), NOW)).toMatchObject({ health: 'stalled', recommendedAction: 'restart' });
   });
 
   it('keeps sleeping and terminal states healthy', () => {

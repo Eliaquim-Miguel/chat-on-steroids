@@ -7433,6 +7433,29 @@ async function queueStalledTabRecovery(conversationId: string, now = Date.now())
   }
 }
 
+export async function requestAgentHealthRecovery(
+  conversationId: string
+): Promise<'queued' | 'pending' | 'refused'> {
+  const session = await findSessionByConversation(conversationId, { requireUnique: true });
+  const agent = agentInfoForOwnedConversation(conversationId);
+  if (
+    !session ||
+    !agent ||
+    agent.role !== 'worker' ||
+    agent.state !== 'detached' ||
+    !departureAllowsRepair(session) ||
+    isChatBlocked(conversationId) ||
+    stopRequestedFor(conversationId)
+  ) return 'refused';
+
+  const held = repairsInFlight.get(conversationId);
+  if (held && held.state !== 'done') return 'pending';
+
+  const episode = `agent-health:${agent.detachedAt ?? agent.lastSeenAt ?? 0}`;
+  if (queueBrowserRecovery(conversationId, session.id, episode, 'stalled', 0, Date.now())) return 'queued';
+  return repairsInFlight.has(conversationId) ? 'pending' : 'refused';
+}
+
 /**
  * Every live chat this app can presently prove is mid-turn.
  *

@@ -8,6 +8,8 @@ import type {
 } from '../shared/agent-health.js';
 import type { AgentInfo } from '../shared/session.js';
 
+export const AGENT_DETACHED_RECOVERY_GRACE_MS = 45_000;
+
 export interface AgentBridgeHealthEvidence {
   agentId: string;
   conversationId: string;
@@ -174,7 +176,25 @@ export function evaluateAgentHealth(input: AgentHealthInput, observedAt: number)
   }
 
   if (broker?.state === 'detached') {
-    return result(input, observedAt, activity, 'degraded', 'observe', 'Broker lifecycle state is detached.');
+    const detachedAt = broker.detachedAt;
+    if (
+      evidence.browserPresent === false &&
+      detachedAt !== null &&
+      detachedAt !== undefined &&
+      Number.isFinite(detachedAt) &&
+      detachedAt <= observedAt &&
+      observedAt - detachedAt >= AGENT_DETACHED_RECOVERY_GRACE_MS
+    ) {
+      return result(
+        input,
+        observedAt,
+        activity,
+        'stalled',
+        'restart',
+        `Detached worker has had no browser view for at least ${AGENT_DETACHED_RECOVERY_GRACE_MS} ms.`
+      );
+    }
+    return result(input, observedAt, activity, 'degraded', 'observe', 'Broker lifecycle state is detached inside the safe recovery grace.');
   }
 
   if (broker?.lastSeenAt !== null && broker?.lastSeenAt !== undefined) {

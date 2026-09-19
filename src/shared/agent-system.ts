@@ -15,6 +15,7 @@ export interface AgentSystemTaskStatus {
 export interface AgentSystemAgentStatus {
   id: string;
   label: string;
+  conversationId: string | null;
   state: string;
   active: boolean;
   activity: AgentActivity;
@@ -29,7 +30,7 @@ export interface AgentSystemAgentStatus {
 
 export interface AgentSystemStatus {
   observedAt: number;
-  recoveryPolicy: 'off';
+  recoveryPolicy: 'safe';
   runId: string;
   planId: string | null;
   managerAgentId: string;

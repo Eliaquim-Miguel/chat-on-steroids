@@ -14,6 +14,7 @@ import { getChatModels, restoreChatModels, startChatModelDiscovery } from './cha
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { startAgentRuntimeGc } from './runtime-gc.js';
+import { startAgentHealthRecovery } from './agent-health-recovery.js';
 import { reconcileExecutions } from './execution.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
@@ -94,6 +95,7 @@ let shutdownStarted = false;
 let shutdownComplete = false;
 const usageWarmup = new AbortController();
 let stopAgentRuntimeGc: (() => void) | null = null;
+let stopAgentHealthRecovery: (() => void) | null = null;
 
 // One instance only: two copies would fight over the tunnel and the config file.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -409,6 +411,9 @@ void app.whenReady().then(async () => {
   stopAgentRuntimeGc = startAgentRuntimeGc({
     onError: (error) => logWarn(`agent runtime GC: ${error.message}`)
   });
+  stopAgentHealthRecovery = startAgentHealthRecovery({
+    onError: (error) => logWarn(`agent health recovery: ${error.message}`)
+  });
 
   // Strict CSP for our own page. There is no remote content and no inline script.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -484,6 +489,8 @@ app.on('before-quit', () => {
   usageWarmup.abort();
   stopAgentRuntimeGc?.();
   stopAgentRuntimeGc = null;
+  stopAgentHealthRecovery?.();
+  stopAgentHealthRecovery = null;
 });
 
 app.on('window-all-closed', () => {
