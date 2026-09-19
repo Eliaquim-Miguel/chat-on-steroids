@@ -112,7 +112,7 @@ export function assignManagerForPrime(caller: Caller, managerAgentId: string): P
   return enqueueAuthority(async () => {
     if (!caller.conversationId) throw new IdentityLostError();
     const status = statusForCaller(caller);
-    if (!status.self || status.self.id !== PRIME_ID) {
+    if (!status.self || self.id !== PRIME_ID) {
       throw new AgentError('MANAGER_ASSIGNMENT_DENIED: only the proven Prime conversation may designate a Manager.');
     }
     const target = status.state.agents.find((agent) => agent.id === managerAgentId);
@@ -150,11 +150,12 @@ export function managerForCaller(caller: Caller): Promise<ManagerAuthority> {
     if (!status.self || status.self.role !== 'worker') {
       throw new AgentError('MANAGER_AUTHORITY_DENIED: the proven caller is not the designated Manager worker.');
     }
+    const self = status.self;
 
     const state = await readAuthorityState();
     const claimed = state.entries.find((entry) => entry.managerConversationId === caller.conversationId);
     if (claimed) {
-      if (claimed.managerAgentId !== status.self.id) {
+      if (claimed.managerAgentId !== self.id) {
         throw new AgentError('MANAGER_AUTHORITY_CORRUPT: the claimed Manager conversation resolves to a different worker.');
       }
       return authorityOf(claimed);
@@ -164,7 +165,7 @@ export function managerForCaller(caller: Caller): Promise<ManagerAuthority> {
     const pending = state.entries.find(
       (entry) =>
         entry.managerConversationId === null &&
-        entry.managerAgentId === status.self.id &&
+        entry.managerAgentId === self.id &&
         entry.ownerPrimeConversationId === currentPrimeConversationId
     );
     if (!pending) {
