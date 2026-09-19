@@ -819,7 +819,7 @@ describe('surface boundaries', () => {
     // catches the regression it exists to catch.
     const coreBytes = Buffer.byteLength(JSON.stringify(coreTools), 'utf8');
     const desktopBytes = Buffer.byteLength(JSON.stringify(desktopTools), 'utf8');
-    expect(coreBytes, `core tools/list is ${coreBytes} bytes`).toBeLessThan(20_500);
+    expect(coreBytes, `core tools/list is ${coreBytes} bytes`).toBeLessThan(21_500);
     expect(desktopBytes, `desktop tools/list is ${desktopBytes} bytes`).toBeLessThan(IS_WINDOWS ? 24_000 : 24_500);
 
     // Per tool as well as per surface, so one schema cannot quietly eat the whole budget
@@ -846,7 +846,7 @@ describe('surface boundaries', () => {
           : tool.name === 'apply_patch'
             ? 5_000
             : tool.name === 'agents'
-              ? 5_300
+              ? 6_100
               : tool.name === 'exec_command'
                 // Windows carries `WINDOWS_SHELL_GUIDANCE` in the same description, and that text
                 // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a

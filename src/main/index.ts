@@ -14,6 +14,7 @@ import { getChatModels, restoreChatModels, startChatModelDiscovery } from './cha
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { startAgentRuntimeGc } from './runtime-gc.js';
+import { reconcileExecutions } from './execution.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
@@ -331,6 +332,10 @@ void app.whenReady().then(async () => {
   const savedGoalReplies = await readDurable<GoalRepliesSnapshot>(GOAL_REPLIES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalReplies(savedGoalReplies);
+  // Autonomous execution is a thin durable owner over the current input + Goal/Loop stack.
+  // Reconcile after those authorities are restored but before browser/MCP admission starts.
+  await reconcileExecutions();
+  if (windowActivation.isDisabled()) return;
   // Request ownership must exist before either side of the bridge can race in. A request id
   // that was proved yesterday remains the same workflow today even if its ChatGPT tab closed.
   await restoreRequestCorrelations();
