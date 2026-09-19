@@ -4121,6 +4121,43 @@ export function initChat(next: Deps): void {
     list: scope => api.skillLibrary(scope), command: name => {
       if (name === 'plan') { $('createPlan').click(); return; }
       if (name === 'compact') { $('compactSession').click(); return; }
+
+      const input = $<HTMLTextAreaElement>('chatInput');
+      const appendPreset = (preset: string): void => {
+        const existing = input.value.trim();
+        input.value = existing ? `${preset}\n\nTask:\n${existing}` : `${preset}\n\nTask:\n`;
+        input.setSelectionRange(input.value.length, input.value.length);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+
+      if (name === 'team') {
+        appendPreset([
+          'Use Agent System 3.0 for this task instead of an unstructured worker swarm.',
+          'Inspect the current agent status first. Reuse suitable sleeping workers; spawn only what is actually needed.',
+          'Create or select one Manager worker, then have the proven Prime designate it with agents action=assign_manager.',
+          'The Manager must submit a concrete DAG with agents action=plan: scoped tasks, dependencies, acceptance criteria, expected verification, forbidden actions, and risk class.',
+          'Let the scheduler assign ready work. Workers must report completion through complete_task with revision, changed files and verification evidence; reviewers must use review_task, and finish with review_run.',
+          'Do not claim progress that the Control Center has not recorded. Continue until the run is verified or a real blocker needs user input.'
+        ].join(' '));
+        return;
+      }
+
+      if (name === 'autopilot') {
+        const automation = $<HTMLSelectElement>('chatAutomation');
+        automation.value = 'loop';
+        automation.dispatchEvent(new Event('change', { bubbles: true }));
+        const delivery = $<HTMLSelectElement>('loopDelivery');
+        delivery.value = 'after-turn';
+        delivery.dispatchEvent(new Event('change', { bubbles: true }));
+        appendPreset([
+          'Work autonomously on this objective using Loop and keep going across turns until it is actually verified complete.',
+          'Use planning, tests, agents, Compact & Resume, and the existing recovery mechanisms when useful.',
+          'Stay inside the requested scope. Do not invent unrelated product work, publish externally, alter billing or credentials, or perform destructive actions unless the task explicitly authorizes them.',
+          'If progress is impossible without a user decision, report the exact blocker and stop instead of guessing.'
+        ].join(' '));
+        return;
+      }
+
       const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = name;
       automation.dispatchEvent(new Event('change', { bubbles: true }));
     } });
