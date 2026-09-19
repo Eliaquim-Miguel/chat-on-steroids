@@ -134,13 +134,18 @@ export function brokerFreeSlotsForPrime(ownerPrimeConversationId: string): numbe
   return statusForCaller({ conversationId: ownerPrimeConversationId }).freeWorkerSlots;
 }
 
+export function brokerRunIdForPrime(ownerPrimeConversationId: string): string | null {
+  return statusForCaller({ conversationId: ownerPrimeConversationId }).runId;
+}
+
 export function bindTaskWorktree(
+  runId: string,
   workerId: string,
   conversationId: string | null,
   worktree: TaskWorktreeRecord
 ): void {
   const workspace = { virtual: worktree.virtualPath, real: worktree.realPath };
-  setWorkspaceFor(`agent:${workerId}`, workspace);
+  setWorkspaceFor(`agent:${runId}:${workerId}`, workspace);
   if (conversationId) setWorkspaceFor(`chat:${conversationId}`, workspace);
 }
 

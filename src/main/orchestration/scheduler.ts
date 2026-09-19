@@ -15,6 +15,7 @@ import {
   assignmentEvidenceForPrime,
   bindTaskWorktree,
   brokerFreeSlotsForPrime,
+  brokerRunIdForPrime,
   brokerWorkersForPrime,
   type AssignmentEvidence
 } from './broker-assignment.js';
@@ -50,7 +51,7 @@ export interface SchedulerDependencies {
   stageSpawn(ownerPrimeConversationId: string, task: TaskRecord, contract: string): StagedSchedulerAssignment;
   stageReuse(ownerPrimeConversationId: string, workerId: string, contract: string): StagedSchedulerAssignment;
   persistBroker(): Promise<boolean>;
-  bindWorkspace(workerId: string, conversationId: string | null, worktree: TaskWorktreeRecord): void;
+  bindWorkspace(runId: string, workerId: string, conversationId: string | null, worktree: TaskWorktreeRecord): void;
   republish?(workerId: string): void | Promise<void>;
   /** Optional test diagnostic seam; production ignores it. */
   published?: string[];
@@ -87,24 +88,25 @@ const DEFAULT_DEPS: SchedulerDependencies = {
       conversationId: created.conversationId,
       commit: staged.commit,
       rollback: staged.rollback,
-      publish: () => { requestWorkerBootstraps([created.id]); }
+      publish: () => { requestWorkerBootstraps([created.id], staged.runId); }
     };
   },
   stageReuse: (owner, workerId, contract) => {
     const workers = brokerWorkersForPrime(owner);
     const worker = workers.find((entry) => entry.id === workerId);
     if (!worker?.conversationId) throw new Error(`SCHEDULER_REUSE_IDENTITY: ${workerId} has no exact conversation`);
-    const staged = stageMessages({ conversationId: owner }, [{ to: workerId, text: contract }]);
+    const runId = brokerRunIdForPrime(owner);
+    const staged = stageMessages({ conversationId: owner, ...(runId ? { runId } : {}) }, [{ to: workerId, text: contract }]);
     return {
       workerId,
       conversationId: worker.conversationId,
       commit: staged.commit,
       rollback: staged.rollback,
-      publish: () => { if (staged.waking.length > 0) requestWorkerRevivals(staged.waking); }
+      publish: () => { if (staged.waking.length > 0) requestWorkerRevivals(staged.waking, runId ?? undefined); }
     };
   },
   persistBroker: () => persistCriticalSwarmNow(),
-  bindWorkspace: (workerId, conversationId, worktree) => bindTaskWorktree(workerId, conversationId, worktree),
+  bindWorkspace: (runId, workerId, conversationId, worktree) => bindTaskWorktree(runId, workerId, conversationId, worktree),
   republish: (workerId) => {
     requestWorkerBootstraps([workerId]);
     requestWorkerRevivals([workerId]);
@@ -190,7 +192,7 @@ async function finishEvidenceAssignment(
   }
   await appendAssigned(runtime, task, intent, evidence.workerId);
   const worker = deps.brokerWorkers(runtime.ownerPrimeConversationId).find((entry) => entry.id === evidence.workerId);
-  deps.bindWorkspace(evidence.workerId, worker?.conversationId ?? null, worktree);
+  deps.bindWorkspace(runtime.runId, evidence.workerId, worker?.conversationId ?? null, worktree);
   if (deps.republish) await deps.republish(evidence.workerId);
   return { taskId: task.taskId, workerId: evidence.workerId, strategy: intent.strategy };
 }
@@ -231,7 +233,7 @@ async function executeAssignment(
     // append fails, the intent remains and restart reconciliation finds the exact marker in the
     // already-durable broker snapshot instead of creating another worker/message.
     await appendAssigned(runtime, task, intent, staged.workerId);
-    deps.bindWorkspace(staged.workerId, staged.conversationId, worktree);
+    deps.bindWorkspace(runtime.runId, staged.workerId, staged.conversationId, worktree);
     await staged.publish();
     return { taskId: task.taskId, workerId: staged.workerId, strategy: intent.strategy };
   } catch (error) {
@@ -272,7 +274,7 @@ async function restoreAssignedBindings(runtime: SchedulerRuntime, deps: Schedule
     const worktree = recovered.state.worktrees[task.worktreeId];
     if (!worktree) continue;
     const worker = workers.find((entry) => entry.id === task.assignedWorkerId);
-    deps.bindWorkspace(task.assignedWorkerId, worker?.conversationId ?? null, worktree);
+    deps.bindWorkspace(runtime.runId, task.assignedWorkerId, worker?.conversationId ?? null, worktree);
     if (deps.republish) await deps.republish(task.assignedWorkerId);
   }
 }
