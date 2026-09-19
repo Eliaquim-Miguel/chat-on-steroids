@@ -3147,6 +3147,17 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-panel-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 8px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
 .agent-panel-row:hover { background: var(--hover); }
 .agent-panel-row > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-control-entry { margin-bottom: 12px; background: var(--sunk); border: 1px solid var(--line); }
+.agent-control-icon { display: grid; place-items: center; width: 22px; height: 22px; flex: 0 0 22px; border-radius: 7px; background: var(--ink); color: var(--page); font-size: 11px; font-weight: 700; }
+.agent-control-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.agent-control-stat { min-width: 0; padding: 12px 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--sunk); color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); text-align: center; }
+.agent-control-tasks { margin-top: 20px; }
+.agent-control-task { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.agent-control-task-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.agent-control-task-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; }
+.agent-control-state { flex: 0 0 auto; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 7px; border-radius: 999px; background: var(--hover); color: var(--soft); font-size: calc(9px * var(--text-scale, 1)); text-transform: capitalize; }
+.agent-control-state[data-state='VERIFIED'] { background: color-mix(in srgb, #3a9d65 14%, transparent); color: #3a9d65; }
+.agent-control-state[data-state='FAILED'], .agent-control-state[data-state='BLOCKED'] { background: color-mix(in srgb, #c64b4b 14%, transparent); color: #c64b4b; }
 .agent-panel-body .ev { display: block; margin: 24px 0; }
 .agent-panel-body :is(.ev-tool_call, .ev-page_tool, .ev-agent_message) { margin: 0; }
 .agent-panel-body .ev-body { min-width: 0; }

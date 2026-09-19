@@ -2473,9 +2473,9 @@ describe('through the MCP endpoint', () => {
     await endpoint.stop();
   });
 
-  // One flat tool with five actions. The names it replaced are gone outright, not aliased,
-  // so a chat still holding the old instructions gets an honest unknown-tool error.
-  it('publishes one agents tool with exactly four actions', async () => {
+  // One flat agents tool owns both the stable V2 broker actions and the Agent System 3.0
+  // orchestration actions. The names it replaced are gone outright, not aliased.
+  it('publishes one agents tool with the broker and Agent System 3.0 actions', async () => {
     const reply = await post({ jsonrpc: '2.0', id: nextId++, method: 'tools/list', params: {} });
     const names = (reply.result.tools as Array<{ name: string }>).map((tool) => tool.name);
     expect(names).toContain('agents');
@@ -2494,7 +2494,19 @@ describe('through the MCP endpoint', () => {
     const schema = (reply.result.tools as Array<{ name: string; inputSchema: any }>).find(
       (tool) => tool.name === 'agents'
     )!.inputSchema;
-    expect(schema.properties.action.enum.slice().sort()).toEqual(['finish', 'message', 'spawn', 'status']);
+    expect(schema.properties.action.enum.slice().sort()).toEqual([
+      'advance',
+      'assign_manager',
+      'complete_task',
+      'control_center',
+      'finish',
+      'message',
+      'plan',
+      'review_run',
+      'review_task',
+      'spawn',
+      'status'
+    ]);
     // Revive is gone from the wire as well as from the broker: no field survives for it.
     expect(Object.keys(schema.properties)).not.toContain('agent');
   });
