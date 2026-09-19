@@ -3924,7 +3924,9 @@ export function initChat(next: Deps): void {
   agentPanel = createAgentPanel({
     host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
     onShow: () => filePanel?.hide(),
-    load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
+    load: id => run(api.getSession(id, { limit: 160 })),
+    loadControlCenter: () => run(api.getAgentSystemStatus()),
+    openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';
       const rows = foldAgentCommunication(source).flatMap(event => {
