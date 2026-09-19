@@ -89,7 +89,7 @@ describe('agent health projection', () => {
     expect(evaluateAgentHealth(input(
       { browserPresent: false },
       { state: 'detached', detachedAt: NOW - AGENT_DETACHED_RECOVERY_GRACE_MS - 1 }
-    ), NOW)).toMatchObject({ health: 'stalled', recommendedAction: 'restart' });
+    ), NOW)).toMatchObject({ health: 'stalled', recommendedAction: 'wake' });
   });
 
   it('keeps sleeping and terminal states healthy', () => {
