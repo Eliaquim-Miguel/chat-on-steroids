@@ -13,6 +13,7 @@ import { registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
+import { startAgentRuntimeGc } from './runtime-gc.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
@@ -91,6 +92,7 @@ let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
 const usageWarmup = new AbortController();
+let stopAgentRuntimeGc: (() => void) | null = null;
 
 // One instance only: two copies would fight over the tunnel and the config file.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -399,6 +401,10 @@ void app.whenReady().then(async () => {
   await reconcileAgentRequestOwners();
   if (windowActivation.isDisabled()) return;
 
+  stopAgentRuntimeGc = startAgentRuntimeGc({
+    onError: (error) => logWarn(`agent runtime GC: ${error.message}`)
+  });
+
   // Strict CSP for our own page. There is no remote content and no inline script.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
@@ -471,6 +477,8 @@ app.on('before-quit', () => {
   // that sequence drains must not recreate or reveal a window after the tray has disappeared.
   windowActivation.disable();
   usageWarmup.abort();
+  stopAgentRuntimeGc?.();
+  stopAgentRuntimeGc = null;
 });
 
 app.on('window-all-closed', () => {
