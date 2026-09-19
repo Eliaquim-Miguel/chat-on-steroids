@@ -23,6 +23,7 @@ import {
   assignmentEvidenceForPrime,
   bindTaskWorktree,
   brokerFreeSlotsForPrime,
+  brokerRunIdForPrime,
   brokerWorkersForPrime,
   messageEvidenceForPrime
 } from './broker-assignment.js';
@@ -44,6 +45,12 @@ const MAX_LIST = 100;
 const MAX_ITEM = 1000;
 const MAX_GIT_OUTPUT = 4 * 1024 * 1024;
 const GATE_TIMEOUT_MS = 5 * 60_000;
+
+function exactBrokerRunId(runtime: WorkflowRuntime): string {
+  const runId = brokerRunIdForPrime(runtime.ownerPrimeConversationId);
+  if (!runId) throw new Error('WORKFLOW_BROKER_RUN_LOST');
+  return runId;
+}
 
 export interface WorkflowRuntime {
   runId: string;
@@ -405,9 +412,10 @@ async function stageReviewerMessage(
   taskWorktree: TaskWorktreeRecord | null
 ): Promise<string | null> {
   if (brokerFreeSlotsForPrime(runtime.ownerPrimeConversationId) <= 0) return null;
+  const brokerRunId = exactBrokerRunId(runtime);
   const staged = workerId
-    ? stageMessages({ conversationId: runtime.ownerPrimeConversationId }, [{ to: workerId, text: contract }])
-    : stageSpawn({ caller: { conversationId: runtime.ownerPrimeConversationId }, workers: [{ label, task: contract }] });
+    ? stageMessages({ conversationId: runtime.ownerPrimeConversationId, runId: brokerRunId }, [{ to: workerId, text: contract }])
+    : stageSpawn({ caller: { conversationId: runtime.ownerPrimeConversationId, runId: brokerRunId }, workers: [{ label, task: contract }] });
   const reviewerId = workerId ?? ('created' in staged ? staged.created[0]?.id ?? null : null);
   if (!reviewerId) {
     staged.rollback();
@@ -420,9 +428,9 @@ async function stageReviewerMessage(
     }
     staged.commit();
     const worker = brokerWorkersForPrime(runtime.ownerPrimeConversationId).find((entry) => entry.id === reviewerId);
-    if (taskWorktree) bindTaskWorktree(reviewerId, worker?.conversationId ?? null, taskWorktree);
-    if ('created' in staged) requestWorkerBootstraps([reviewerId]);
-    else if (staged.waking.length > 0) requestWorkerRevivals(staged.waking);
+    if (taskWorktree) bindTaskWorktree(brokerRunId, reviewerId, worker?.conversationId ?? null, taskWorktree);
+    if ('created' in staged) requestWorkerBootstraps([reviewerId], brokerRunId);
+    else if (staged.waking.length > 0) requestWorkerRevivals(staged.waking, brokerRunId);
     return reviewerId;
   } catch (error) {
     staged.rollback();
@@ -459,9 +467,10 @@ async function defaultAssignReviewer(
   const evidence = assignmentEvidenceForPrime(runtime.ownerPrimeConversationId, operationId);
   if (evidence) {
     const worker = brokerWorkersForPrime(runtime.ownerPrimeConversationId).find((entry) => entry.id === evidence.workerId);
-    bindTaskWorktree(evidence.workerId, worker?.conversationId ?? null, worktree);
-    requestWorkerBootstraps([evidence.workerId]);
-    requestWorkerRevivals([evidence.workerId]);
+    const brokerRunId = exactBrokerRunId(runtime);
+    bindTaskWorktree(brokerRunId, evidence.workerId, worker?.conversationId ?? null, worktree);
+    requestWorkerBootstraps([evidence.workerId], brokerRunId);
+    requestWorkerRevivals([evidence.workerId], brokerRunId);
     return evidence.workerId;
   }
   const excluded = new Set<string>([task.assignedWorkerId ?? '']);
@@ -480,13 +489,14 @@ async function defaultAssignReviewer(
 
 async function defaultSendWorkerMessage(runtime: WorkflowRuntime, workerId: string, text: string): Promise<boolean> {
   try {
-    const staged = stageMessages({ conversationId: runtime.ownerPrimeConversationId }, [{ to: workerId, text }]);
+    const brokerRunId = exactBrokerRunId(runtime);
+    const staged = stageMessages({ conversationId: runtime.ownerPrimeConversationId, runId: brokerRunId }, [{ to: workerId, text }]);
     if (!(await persistCriticalSwarmNow())) {
       staged.rollback();
       return false;
     }
     staged.commit();
-    if (staged.waking.length > 0) requestWorkerRevivals(staged.waking);
+    if (staged.waking.length > 0) requestWorkerRevivals(staged.waking, brokerRunId);
     return true;
   } catch {
     return false;
@@ -1270,7 +1280,8 @@ async function runtimeForCaller(caller: Caller): Promise<{ runtime: WorkflowRunt
   const status = statusForCaller(caller);
   const orchestration = await recoverOrchestrationState();
   if (!orchestration.state.runId || !orchestration.state.managerAgentId) throw new Error('No Agent System 3.0 run is active');
-  const ownerPrimeConversationId = agentConversation(PRIME_ID);
+  if (!status.self) throw new Error('WORKFLOW_CALLER_IDENTITY_LOST');
+  const ownerPrimeConversationId = agentConversation(PRIME_ID, status.runId ?? undefined);
   if (!ownerPrimeConversationId) throw new Error('WORKFLOW_PRIME_IDENTITY_LOST');
   return {
     runtime: {

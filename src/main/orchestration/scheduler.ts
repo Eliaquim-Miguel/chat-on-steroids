@@ -52,7 +52,7 @@ export interface SchedulerDependencies {
   stageReuse(ownerPrimeConversationId: string, workerId: string, contract: string): StagedSchedulerAssignment;
   persistBroker(): Promise<boolean>;
   bindWorkspace(runId: string, workerId: string, conversationId: string | null, worktree: TaskWorktreeRecord): void;
-  republish?(workerId: string): void | Promise<void>;
+  republish?(workerId: string, brokerRunId: string): void | Promise<void>;
   /** Optional test diagnostic seam; production ignores it. */
   published?: string[];
 }
@@ -107,9 +107,9 @@ const DEFAULT_DEPS: SchedulerDependencies = {
   },
   persistBroker: () => persistCriticalSwarmNow(),
   bindWorkspace: (runId, workerId, conversationId, worktree) => bindTaskWorktree(runId, workerId, conversationId, worktree),
-  republish: (workerId) => {
-    requestWorkerBootstraps([workerId]);
-    requestWorkerRevivals([workerId]);
+  republish: (workerId, brokerRunId) => {
+    requestWorkerBootstraps([workerId], brokerRunId);
+    requestWorkerRevivals([workerId], brokerRunId);
   }
 };
 
@@ -193,7 +193,11 @@ async function finishEvidenceAssignment(
   await appendAssigned(runtime, task, intent, evidence.workerId);
   const worker = deps.brokerWorkers(runtime.ownerPrimeConversationId).find((entry) => entry.id === evidence.workerId);
   deps.bindWorkspace(runtime.runId, evidence.workerId, worker?.conversationId ?? null, worktree);
-  if (deps.republish) await deps.republish(evidence.workerId);
+  if (deps.republish) {
+    const brokerRunId = brokerRunIdForPrime(runtime.ownerPrimeConversationId);
+    if (!brokerRunId) throw new Error('SCHEDULER_BROKER_RUN_LOST');
+    await deps.republish(evidence.workerId, brokerRunId);
+  }
   return { taskId: task.taskId, workerId: evidence.workerId, strategy: intent.strategy };
 }
 
@@ -275,7 +279,11 @@ async function restoreAssignedBindings(runtime: SchedulerRuntime, deps: Schedule
     if (!worktree) continue;
     const worker = workers.find((entry) => entry.id === task.assignedWorkerId);
     deps.bindWorkspace(runtime.runId, task.assignedWorkerId, worker?.conversationId ?? null, worktree);
-    if (deps.republish) await deps.republish(task.assignedWorkerId);
+    if (deps.republish) {
+      const brokerRunId = brokerRunIdForPrime(runtime.ownerPrimeConversationId);
+      if (!brokerRunId) throw new Error('SCHEDULER_BROKER_RUN_LOST');
+      await deps.republish(task.assignedWorkerId, brokerRunId);
+    }
   }
 }
 
