@@ -28,6 +28,7 @@ import {
   messageEvidenceForPrime
 } from './broker-assignment.js';
 import { recoverOrchestrationState } from './recovery.js';
+import { managerRuntimeForRun } from './manager-authority.js';
 import { runSchedulerCycleForRuntime } from './scheduler.js';
 import {
   appendOrchestrationEvent,
@@ -1280,14 +1281,23 @@ async function runtimeForCaller(caller: Caller): Promise<{ runtime: WorkflowRunt
   const status = statusForCaller(caller);
   const orchestration = await recoverOrchestrationState();
   if (!orchestration.state.runId || !orchestration.state.managerAgentId) throw new Error('No Agent System 3.0 run is active');
-  if (!status.self) throw new Error('WORKFLOW_CALLER_IDENTITY_LOST');
-  const ownerPrimeConversationId = agentConversation(PRIME_ID, status.runId ?? undefined);
-  if (!ownerPrimeConversationId) throw new Error('WORKFLOW_PRIME_IDENTITY_LOST');
+  if (!status.self || !status.runId) throw new Error('WORKFLOW_CALLER_IDENTITY_LOST');
+
+  const callerPrimeConversationId = agentConversation(PRIME_ID, status.runId);
+  if (!callerPrimeConversationId) throw new Error('WORKFLOW_PRIME_IDENTITY_LOST');
+  const authority = await managerRuntimeForRun(orchestration.state.runId);
+  if (!authority || authority.agentId !== orchestration.state.managerAgentId) {
+    throw new Error('WORKFLOW_MANAGER_AUTHORITY_LOST');
+  }
+  if (authority.ownerPrimeConversationId !== callerPrimeConversationId) {
+    throw new Error('WORKFLOW_OWNER_MISMATCH: this agent family does not own the active Agent System 3.0 run');
+  }
+
   return {
     runtime: {
       runId: orchestration.state.runId,
       managerAgentId: orchestration.state.managerAgentId,
-      ownerPrimeConversationId
+      ownerPrimeConversationId: authority.ownerPrimeConversationId
     },
     agentId: status.self.id
   };

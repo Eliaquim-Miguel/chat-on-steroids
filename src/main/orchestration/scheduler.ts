@@ -77,8 +77,10 @@ const DEFAULT_DEPS: SchedulerDependencies = {
   freeBrokerSlots: (owner) => brokerFreeSlotsForPrime(owner),
   assignmentEvidence: (owner, operationId) => assignmentEvidenceForPrime(owner, operationId),
   stageSpawn: (owner, task, contract) => {
+    const runId = brokerRunIdForPrime(owner);
+    if (!runId) throw new Error('SCHEDULER_BROKER_RUN_LOST');
     const staged = stageSpawn({
-      caller: { conversationId: owner },
+      caller: { conversationId: owner, runId },
       workers: [{ label: task.title.slice(0, 80), task: contract }]
     });
     const created = staged.created[0];
