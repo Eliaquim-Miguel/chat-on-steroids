@@ -2499,6 +2499,7 @@ describe('through the MCP endpoint', () => {
       'assign_manager',
       'complete_task',
       'control_center',
+      'execution',
       'finish',
       'message',
       'plan',

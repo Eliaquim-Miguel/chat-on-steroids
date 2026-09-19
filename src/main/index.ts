@@ -13,6 +13,9 @@ import { registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
+import { startAgentRuntimeGc } from './runtime-gc.js';
+import { startAgentHealthRecovery } from './agent-health-recovery.js';
+import { reconcileExecutions } from './execution.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
 import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
@@ -91,6 +94,8 @@ let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
 const usageWarmup = new AbortController();
+let stopAgentRuntimeGc: (() => void) | null = null;
+let stopAgentHealthRecovery: (() => void) | null = null;
 
 // One instance only: two copies would fight over the tunnel and the config file.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -329,6 +334,10 @@ void app.whenReady().then(async () => {
   const savedGoalReplies = await readDurable<GoalRepliesSnapshot>(GOAL_REPLIES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalReplies(savedGoalReplies);
+  // Autonomous execution is a thin durable owner over the current input + Goal/Loop stack.
+  // Reconcile after those authorities are restored but before browser/MCP admission starts.
+  await reconcileExecutions();
+  if (windowActivation.isDisabled()) return;
   // Request ownership must exist before either side of the bridge can race in. A request id
   // that was proved yesterday remains the same workflow today even if its ChatGPT tab closed.
   await restoreRequestCorrelations();
@@ -398,6 +407,13 @@ void app.whenReady().then(async () => {
   if (windowActivation.isDisabled()) return;
   await reconcileAgentRequestOwners();
   if (windowActivation.isDisabled()) return;
+
+  stopAgentRuntimeGc = startAgentRuntimeGc({
+    onError: (error) => logWarn(`agent runtime GC: ${error.message}`)
+  });
+  stopAgentHealthRecovery = startAgentHealthRecovery({
+    onError: (error) => logWarn(`agent health recovery: ${error.message}`)
+  });
 
   // Strict CSP for our own page. There is no remote content and no inline script.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -471,6 +487,10 @@ app.on('before-quit', () => {
   // that sequence drains must not recreate or reveal a window after the tray has disappeared.
   windowActivation.disable();
   usageWarmup.abort();
+  stopAgentRuntimeGc?.();
+  stopAgentRuntimeGc = null;
+  stopAgentHealthRecovery?.();
+  stopAgentHealthRecovery = null;
 });
 
 app.on('window-all-closed', () => {

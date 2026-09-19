@@ -3408,3 +3408,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+
+.agent-control-agents { margin-top: 20px; }
+.agent-control-agent { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.agent-control-health { flex: 0 0 auto; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 7px; border-radius: 999px; background: var(--hover); color: var(--soft); font-size: calc(9px * var(--text-scale, 1)); text-transform: capitalize; }
+.agent-control-health[data-health='healthy'] { background: color-mix(in srgb, #3a9d65 14%, transparent); color: #3a9d65; }
+.agent-control-health[data-health='degraded'], .agent-control-health[data-health='unknown'] { background: color-mix(in srgb, #c58a2f 14%, transparent); color: #a66f19; }
+.agent-control-health[data-health='stalled'], .agent-control-health[data-health='blocked'] { background: color-mix(in srgb, #c64b4b 14%, transparent); color: #c64b4b; }

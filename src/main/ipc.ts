@@ -95,7 +95,10 @@ import {
 import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
+  activeRunIds,
+  agentConversation,
   clearAgent,
+  PRIME_ID,
   primeForOwnedConversation,
   onSwarmChange,
   pauseSwarmForDisable,
@@ -108,6 +111,7 @@ import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
 import { openInPreferredBrowser } from './browser.js';
 import { agentSystemStatusForUi } from './orchestration/status.js';
+import { captureAgentRuntimeTargets, releaseCapturedAgentRuntimeTargets } from './runtime-gc.js';
 import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
   getMacOSDesktopAccess,
@@ -1107,10 +1111,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('swarm:get', async () => swarmState());
   handle('swarm:controlCenter', async () => agentSystemStatusForUi());
   handle('swarm:reset', async () => {
+    const runtimeTargets = await captureAgentRuntimeTargets();
     resetSwarm();
     if (!(await persistAgentAuthorityNow())) {
       throw new Error('The cleared run could not be made durable. Retry clearing the swarm.');
     }
+    await releaseCapturedAgentRuntimeTargets(runtimeTargets);
     return swarmState();
   });
   /**
@@ -1124,12 +1130,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    */
   handle('swarm:clearAgent', async (payload) => {
     const { id, runId } = z.object({ id: agentIdArg, runId: z.string().min(1).max(200).optional() }).parse(typeof payload === 'string' ? { id: payload } : payload);
+    const activeRuns = activeRunIds();
+    const resolvedRunId = runId ?? (activeRuns.length === 1 ? activeRuns[0] : undefined);
+    const conversations = new Set<string>();
+    if (resolvedRunId && id === PRIME_ID) {
+      for (const agent of swarmState(resolvedRunId).agents) {
+        if (agent.runId === resolvedRunId && agent.conversationId) conversations.add(agent.conversationId);
+      }
+    } else {
+      const conversationId = agentConversation(id, resolvedRunId);
+      if (conversationId) conversations.add(conversationId);
+    }
+    const runtimeTargets = await captureAgentRuntimeTargets(conversations);
     const outcome = clearAgent(id, runId);
     if (outcome.cleared !== 'none') {
       if (!(await persistAgentAuthorityNow())) {
         throw new Error('The agent clear could not be made durable. Retry the clear action.');
       }
       if (outcome.cleared === 'worker') cancelWorkerCommands(outcome.reason, id, runId);
+      await releaseCapturedAgentRuntimeTargets(runtimeTargets);
     }
     // The prime's report stays in the main process: the renderer needs the outcome, not
     // the message queued for the prime agent.

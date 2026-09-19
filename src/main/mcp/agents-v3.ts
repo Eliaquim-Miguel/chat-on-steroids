@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { agentForCaller, type Caller } from '../agents.js';
+import { executionStatus, listExecutions, pauseExecution, resumeExecution, startExecution, stopExecution, type ExecutionView } from '../execution.js';
 import { assignManagerForPrime } from '../orchestration/manager-authority.js';
 import { acceptAndScheduleManagerPlanForCaller } from '../orchestration/manager-surface.js';
 import { agentSystemStatusForCaller } from '../orchestration/status.js';
@@ -127,6 +128,23 @@ function workflowResult(action: string, text: string, structuredContent: Record<
   };
 }
 
+function executionProjection(run: ExecutionView): Record<string, unknown> {
+  return {
+    id: run.id,
+    title: run.title,
+    mode: run.mode,
+    status: run.status,
+    session_id: run.sessionId,
+    conversation_id: run.conversationId,
+    active_turn_id: run.activeTurnId,
+    rollovers: run.rollovers,
+    automation: run.automation,
+    pending_input_state: run.pendingInputState,
+    last_error: run.lastError,
+    updated_at: run.updatedAt
+  };
+}
+
 function extendAgentsSchema(base: z.ZodType): z.ZodType {
   if (!(base instanceof z.ZodObject)) {
     throw new Error('Agent System 3.0 expected the existing agents input schema to remain a Zod object');
@@ -136,7 +154,7 @@ function extendAgentsSchema(base: z.ZodType): z.ZodType {
     .safeExtend({
       action: z.enum([
         'spawn', 'message', 'status', 'finish', 'assign_manager', 'plan',
-        'complete_task', 'review_task', 'review_run', 'advance', 'control_center'
+        'complete_task', 'review_task', 'review_run', 'advance', 'control_center', 'execution'
       ]),
       manager_agent_id: z.string().optional(),
       plan_id: z.string().optional(),
@@ -148,7 +166,12 @@ function extendAgentsSchema(base: z.ZodType): z.ZodType {
       risks: boundedWireList.optional(),
       notes: boundedWireList.optional(),
       verdict: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'BLOCKED']).optional(),
-      findings: boundedWireList.optional()
+      findings: boundedWireList.optional(),
+      execution_operation: z.enum(['start', 'status', 'pause', 'resume', 'stop']).optional(),
+      execution_id: z.string().uuid().optional(),
+      execution_title: z.string().trim().min(1).max(160).optional(),
+      execution_plan: z.string().trim().min(1).max(12000).optional(),
+      execution_mode: z.enum(['standard', 'infinite']).optional()
     })
     .superRefine((input, ctx) => {
       if (input.action === 'assign_manager') {
@@ -201,6 +224,30 @@ function extendAgentsSchema(base: z.ZodType): z.ZodType {
       } else {
         if (input.verdict !== undefined) ctx.addIssue({ code: 'custom', path: ['verdict'], message: 'verdict is only valid with a review action' });
         if (input.findings !== undefined) ctx.addIssue({ code: 'custom', path: ['findings'], message: 'findings is only valid with a review action' });
+      }
+
+      const executionFields = ['execution_operation', 'execution_id', 'execution_title', 'execution_plan', 'execution_mode'] as const;
+      if (input.action === 'execution') {
+        const operation = input.execution_operation;
+        if (!operation) {
+          ctx.addIssue({ code: 'custom', path: ['execution_operation'], message: 'action=execution requires execution_operation' });
+        } else if (operation === 'start') {
+          if (!input.execution_plan) ctx.addIssue({ code: 'custom', path: ['execution_plan'], message: 'execution start requires execution_plan' });
+          if (input.execution_id !== undefined) ctx.addIssue({ code: 'custom', path: ['execution_id'], message: 'execution_id is not valid for execution start' });
+        } else if (operation === 'status') {
+          if (input.execution_title !== undefined || input.execution_plan !== undefined || input.execution_mode !== undefined) {
+            ctx.addIssue({ code: 'custom', path: ['execution_operation'], message: 'execution status accepts only optional execution_id' });
+          }
+        } else {
+          if (!input.execution_id) ctx.addIssue({ code: 'custom', path: ['execution_id'], message: `execution ${operation} requires execution_id` });
+          if (input.execution_title !== undefined || input.execution_plan !== undefined || input.execution_mode !== undefined) {
+            ctx.addIssue({ code: 'custom', path: ['execution_operation'], message: `execution ${operation} accepts only execution_id` });
+          }
+        }
+      } else {
+        for (const field of executionFields) {
+          if (input[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: `${field} is only valid with action=execution` });
+        }
       }
     });
 }
@@ -331,6 +378,48 @@ export function decorateCoreRegistrarWithAgentV3(reg: SurfaceRegistrar): Surface
                 `Agent System 3.0: ${status.progress.verified}/${status.progress.total} tasks verified; ${status.agents.filter((agent) => agent.active).length} active agent(s).`,
                 status as unknown as Record<string, unknown>
               );
+            });
+          }
+
+          if (value['action'] === 'execution') {
+            return guard('agents', async () => {
+              if (!reg.agentToolsLive) return reg.featureDisabled('Multi-agent mode', 'Multi-agent mode (experimental)');
+              const operation = value['execution_operation'] as 'start' | 'status' | 'pause' | 'resume' | 'stop';
+              if (operation === 'start') {
+                const run = await startExecution({
+                  title: value['execution_title'] as string | undefined,
+                  plan: value['execution_plan'] as string,
+                  mode: value['execution_mode'] as 'standard' | 'infinite' | undefined
+                });
+                return workflowResult('execution', `Autonomous execution ${run.id} accepted in ${run.mode} mode (${run.status}).`, {
+                  operation,
+                  execution: executionProjection(run)
+                });
+              }
+              if (operation === 'status') {
+                if (typeof value['execution_id'] === 'string') {
+                  const run = await executionStatus(value['execution_id']);
+                  return workflowResult('execution', `Execution ${run.id} is ${run.status}.`, {
+                    operation,
+                    execution: executionProjection(run)
+                  });
+                }
+                const all = await listExecutions();
+                return workflowResult('execution', `${all.length} autonomous execution(s) are recorded.`, {
+                  operation,
+                  executions: all.slice(0, 20).map(executionProjection)
+                });
+              }
+              const id = value['execution_id'] as string;
+              const run = operation === 'pause'
+                ? await pauseExecution(id)
+                : operation === 'resume'
+                  ? await resumeExecution(id)
+                  : await stopExecution(id);
+              return workflowResult('execution', `Execution ${run.id} is now ${run.status}.`, {
+                operation,
+                execution: executionProjection(run)
+              });
             });
           }
 

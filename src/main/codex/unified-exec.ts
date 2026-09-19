@@ -685,6 +685,13 @@ export interface BackgroundTerminalInfo {
   tty: boolean;
 }
 
+export interface ManagedProcessRuntimeInfo extends BackgroundTerminalInfo {
+  lastUsed: number;
+  initialExecCommandActive: boolean;
+}
+
+export type ConditionalTerminationResult = 'terminated' | 'missing' | 'busy' | 'recent' | 'exited';
+
 interface ProcessEntry {
   classifyExit?: ExecCommandRequest['classifyExit'];
   batchMarker?: string;
@@ -694,6 +701,8 @@ interface ProcessEntry {
   hookCommand: string;
   tty: boolean;
   initialExecCommandActive: boolean;
+  /** Last real model interaction with this live terminal session. */
+  lastUsed: number;
   /** Cursor into this process's own completed buffer; offers never consume bytes. */
   delivery?: { offset: number; offer?: { end: number; publication: OutputPublication } };
 }
@@ -806,6 +815,7 @@ export class UnifiedExecProcessManager {
         hookCommand: request.hookCommand,
         tty: request.tty,
         initialExecCommandActive: true,
+        lastUsed: start,
         classifyExit: request.classifyExit, batchMarker: request.batchMarker
       });
     }
@@ -841,7 +851,7 @@ export class UnifiedExecProcessManager {
       }
     } else {
       this.retainCompleted({ process, processId: request.processId, cwd: request.displayCwd,
-        hookCommand: request.hookCommand, tty: request.tty, initialExecCommandActive: false,
+        hookCommand: request.hookCommand, tty: request.tty, initialExecCommandActive: false, lastUsed: start,
         classifyExit: request.classifyExit, batchMarker: request.batchMarker });
       responseProcessId = null;
       exitCode = process.exitCode();
@@ -899,6 +909,9 @@ export class UnifiedExecProcessManager {
       if (saved) return saved;
       const current = this.processes.get(request.processId);
       if (!current || current.process !== locked) throw UnifiedExecError.unknownProcessId(request.processId);
+      // A poll is active use too: periodic GC must never terminate a session while its owner is
+      // attending it, even when that interaction sends no stdin bytes.
+      current.lastUsed = Date.now();
       const { process, tty } = { process: current.process, tty: current.tty };
 
       let statusAfterWrite: ProcessStatus | null = null;
@@ -1015,6 +1028,22 @@ export class UnifiedExecProcessManager {
       }));
   }
 
+  /** Runtime-only view used by the agent GC. Completed/unread rows stay outside this list. */
+  listRuntimeProcesses(): ManagedProcessRuntimeInfo[] {
+    return [...this.processes.values()]
+      .filter((entry) => !entry.process.hasExited())
+      .sort((left, right) => left.processId - right.processId)
+      .map((entry) => ({
+        processId: entry.processId,
+        command: entry.hookCommand,
+        cwd: entry.cwd,
+        pid: entry.process.pid,
+        tty: entry.tty,
+        lastUsed: entry.lastUsed,
+        initialExecCommandActive: entry.initialExecCommandActive
+      }));
+  }
+
   /** Non-destructive obligation view for a caller-owned set of retained sessions. */
   backgroundState(processIds: ReadonlySet<number>): BackgroundExecState {
     const running: number[] = [];
@@ -1094,6 +1123,34 @@ export class UnifiedExecProcessManager {
       } finally { release(); }
     }
     return null;
+  }
+
+  /**
+   * GC-only conditional termination. It rechecks recency under the process interaction lock.
+   * If a process naturally exited, preserve its unread output through the current completed-result
+   * path instead of discarding it just because a maintenance sweep observed the exit.
+   */
+  async terminateProcessIfUnusedSince(processId: number, cutoff: number): Promise<ConditionalTerminationResult> {
+    const entry = this.processes.get(processId);
+    if (!entry) return 'missing';
+    const release = entry.process.interactionLock.tryLock();
+    if (!release) return 'busy';
+    try {
+      const current = this.processes.get(processId);
+      if (!current || current.process !== entry.process) return 'missing';
+      if (current.initialExecCommandActive) return 'busy';
+      if (current.lastUsed > cutoff) return 'recent';
+      if (current.process.hasExited()) {
+        this.retainCompleted(current);
+        return 'exited';
+      }
+      await current.process.terminate();
+      const after = this.processes.get(processId);
+      if (after?.process === current.process) this.releaseProcessId(processId);
+      return 'terminated';
+    } finally {
+      release();
+    }
   }
 
   async terminateProcess(processId: number): Promise<boolean> {

@@ -1,3 +1,4 @@
+import type { AgentActivity, AgentHealth, AgentHealthRecommendedAction } from './agent-health.js';
 export interface AgentSystemTaskStatus {
   id: string;
   title: string;
@@ -14,8 +15,13 @@ export interface AgentSystemTaskStatus {
 export interface AgentSystemAgentStatus {
   id: string;
   label: string;
+  conversationId: string | null;
   state: string;
   active: boolean;
+  activity: AgentActivity;
+  health: AgentHealth;
+  recommendedAction: AgentHealthRecommendedAction;
+  healthReason: string;
   roles: string[];
   pending: number;
   awaitingAck: number;
@@ -23,6 +29,8 @@ export interface AgentSystemAgentStatus {
 }
 
 export interface AgentSystemStatus {
+  observedAt: number;
+  recoveryPolicy: 'off' | 'safe';
   runId: string;
   planId: string | null;
   managerAgentId: string;

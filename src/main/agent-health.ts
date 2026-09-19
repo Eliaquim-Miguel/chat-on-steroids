@@ -1,0 +1,229 @@
+import type {
+  AgentActivity,
+  AgentFiniteWaitEvidence,
+  AgentHealthEvidence,
+  AgentHealthInput,
+  AgentHealthRecommendedAction,
+  AgentHealthSnapshot
+} from '../shared/agent-health.js';
+import type { AgentInfo } from '../shared/session.js';
+
+export const AGENT_DETACHED_RECOVERY_GRACE_MS = 45_000;
+
+export interface AgentBridgeHealthEvidence {
+  agentId: string;
+  conversationId: string;
+  browserPresent: boolean | null;
+  generating: boolean;
+  activeTurnId: boolean;
+  finiteWait: AgentFiniteWaitEvidence | null;
+}
+
+export interface PrimeTransferHealthEvidence {
+  startedAt: number;
+  deadlineMs: number;
+  frozen: boolean;
+}
+
+export interface CollectAgentHealthEvidenceInput {
+  id: string;
+  broker: AgentInfo | null;
+  browser: AgentBridgeHealthEvidence | null;
+  runningToolCalls: number;
+  transfer: PrimeTransferHealthEvidence | null;
+  workflowBlocked: boolean;
+}
+
+export function collectAgentHealthEvidence(input: CollectAgentHealthEvidenceInput): AgentHealthEvidence {
+  const conversationId = input.broker?.conversationId ?? null;
+  const missing = !input.broker || !conversationId;
+  const conflict = Boolean(
+    !missing &&
+      input.browser &&
+      (input.browser.agentId !== input.id || input.browser.conversationId !== conversationId)
+  );
+  const browser = !missing && !conflict ? input.browser : null;
+  const finiteWait: AgentFiniteWaitEvidence | null = input.transfer
+    ? {
+        kind: 'transfer',
+        startedAt: input.transfer.startedAt,
+        deadlineMs: input.transfer.deadlineMs,
+        exempt: input.transfer.frozen,
+        recommendedAction: 'observe'
+      }
+    : browser?.finiteWait ?? null;
+
+  return {
+    identity: missing ? 'missing' : conflict ? 'conflict' : 'exact',
+    browserPresent: browser?.browserPresent ?? null,
+    runningToolCalls: input.runningToolCalls,
+    generating: browser?.generating ?? false,
+    activeTurnId: browser?.activeTurnId ?? false,
+    workflowBlocked: input.workflowBlocked,
+    finiteWait
+  };
+}
+
+function activityFor(input: AgentHealthInput): AgentActivity {
+  const broker = input.broker;
+  if (broker?.state === 'finished' || broker?.state === 'failed') return 'done';
+  if (broker?.state === 'sleeping') return 'sleeping';
+  if (input.evidence.runningToolCalls > 0) return 'tool_call';
+  if (input.evidence.generating || input.evidence.activeTurnId) return 'working';
+  if (broker?.state === 'invited') return 'starting';
+  if (broker?.state === 'waking' || (broker?.pending ?? 0) > 0 || (broker?.awaitingAck ?? 0) > 0) return 'waiting';
+  if (!broker) return 'waiting';
+  return broker.state === 'active' || broker.state === 'detached' ? 'working' : 'waiting';
+}
+
+function timingIsValid(wait: AgentFiniteWaitEvidence, observedAt: number): boolean {
+  return (
+    Number.isFinite(wait.startedAt) &&
+    wait.startedAt <= observedAt &&
+    Number.isFinite(wait.deadlineMs) &&
+    wait.deadlineMs > 0
+  );
+}
+
+function result(
+  input: AgentHealthInput,
+  observedAt: number,
+  activity: AgentActivity,
+  health: AgentHealthSnapshot['health'],
+  recommendedAction: AgentHealthRecommendedAction,
+  reason: string
+): AgentHealthSnapshot {
+  const { evidence } = input;
+  return {
+    agentId: input.id,
+    conversationId: input.broker?.conversationId ?? null,
+    activity,
+    health,
+    observedAt,
+    lastSeenAt: input.broker?.lastSeenAt ?? null,
+    recommendedAction,
+    reason,
+    evidence: {
+      identity: evidence.identity,
+      browserPresent: evidence.browserPresent,
+      runningToolCalls: evidence.runningToolCalls,
+      generating: evidence.generating,
+      activeTurnId: evidence.activeTurnId,
+      workflowBlocked: evidence.workflowBlocked,
+      finiteWaitKind: evidence.finiteWait?.kind ?? null
+    }
+  };
+}
+
+export function evaluateAgentHealth(input: AgentHealthInput, observedAt: number): AgentHealthSnapshot {
+  const activity = activityFor(input);
+  const { broker, evidence } = input;
+
+  if (evidence.workflowBlocked) {
+    return result(input, observedAt, activity, 'blocked', 'user_attention', 'Workflow evidence reports a blocking condition.');
+  }
+
+  if (evidence.identity !== 'exact') {
+    const detail = evidence.identity === 'conflict' ? 'conflicting' : 'missing';
+    return result(
+      input,
+      observedAt,
+      activity,
+      'unknown',
+      'observe',
+      `Conversation identity evidence is ${detail}; exact attribution is unavailable.`
+    );
+  }
+
+  if (evidence.runningToolCalls > 0 || evidence.generating || evidence.activeTurnId) {
+    let reason: string;
+    if (evidence.runningToolCalls > 0) {
+      reason = `Exact conversation has ${evidence.runningToolCalls} MCP call${evidence.runningToolCalls === 1 ? '' : 's'} still inside dispatch.`;
+    } else if (evidence.generating) {
+      reason = 'Exact conversation is reporting active generation.';
+    } else {
+      reason = 'Exact conversation has an active turn identifier.';
+    }
+    return result(input, observedAt, activity, 'healthy', 'none', reason);
+  }
+
+  if (broker?.state === 'finished' || broker?.state === 'failed' || broker?.state === 'sleeping') {
+    return result(input, observedAt, activity, 'healthy', 'none', `Broker lifecycle state is ${broker.state}.`);
+  }
+
+  if (evidence.finiteWait) {
+    const wait = evidence.finiteWait;
+    if (!timingIsValid(wait, observedAt)) {
+      return result(
+        input,
+        observedAt,
+        activity,
+        'degraded',
+        'observe',
+        `Finite ${wait.kind} timing evidence is invalid or future-dated.`
+      );
+    }
+    if (!wait.exempt && observedAt > wait.startedAt + wait.deadlineMs) {
+      return result(
+        input,
+        observedAt,
+        activity,
+        'stalled',
+        wait.recommendedAction,
+        `Finite ${wait.kind} wait exceeded its existing ${wait.deadlineMs} ms deadline.`
+      );
+    }
+  }
+
+  if (broker?.state === 'detached') {
+    const detachedAt = broker.detachedAt;
+    if (
+      evidence.browserPresent === false &&
+      detachedAt !== null &&
+      detachedAt !== undefined &&
+      Number.isFinite(detachedAt) &&
+      detachedAt <= observedAt &&
+      observedAt - detachedAt >= AGENT_DETACHED_RECOVERY_GRACE_MS
+    ) {
+      return result(
+        input,
+        observedAt,
+        activity,
+        'stalled',
+        'wake',
+        `Detached worker has had no browser view for at least ${AGENT_DETACHED_RECOVERY_GRACE_MS} ms.`
+      );
+    }
+    return result(input, observedAt, activity, 'degraded', 'observe', 'Broker lifecycle state is detached inside the safe recovery grace.');
+  }
+
+  if (broker?.lastSeenAt !== null && broker?.lastSeenAt !== undefined) {
+    if (!Number.isFinite(broker.lastSeenAt) || broker.lastSeenAt > observedAt) {
+      return result(
+        input,
+        observedAt,
+        activity,
+        'degraded',
+        'observe',
+        'First-hand liveness timestamp is invalid or future-dated.'
+      );
+    }
+  }
+
+  if (
+    broker &&
+    (broker.state === 'active' || broker.state === 'invited' || broker.state === 'waking') &&
+    evidence.browserPresent === false
+  ) {
+    return result(
+      input,
+      observedAt,
+      activity,
+      'degraded',
+      'observe',
+      'Current evidence says the browser view for this active lifecycle state is absent.'
+    );
+  }
+
+  return result(input, observedAt, activity, 'healthy', 'none', 'Available exact evidence shows no health exception.');
+}
