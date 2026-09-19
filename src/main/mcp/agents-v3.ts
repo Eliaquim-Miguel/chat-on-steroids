@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { agentForCaller, type Caller } from '../agents.js';
 import { assignManagerForPrime } from '../orchestration/manager-authority.js';
 import { acceptAndScheduleManagerPlanForCaller } from '../orchestration/manager-surface.js';
+import { agentSystemStatusForCaller } from '../orchestration/status.js';
 import {
   advanceWorkflowForCaller,
   submitRunReviewForCaller,
@@ -135,7 +136,7 @@ function extendAgentsSchema(base: z.ZodType): z.ZodType {
     .safeExtend({
       action: z.enum([
         'spawn', 'message', 'status', 'finish', 'assign_manager', 'plan',
-        'complete_task', 'review_task', 'review_run', 'advance'
+        'complete_task', 'review_task', 'review_run', 'advance', 'control_center'
       ]),
       manager_agent_id: z.string().optional(),
       plan_id: z.string().optional(),
@@ -316,6 +317,20 @@ export function decorateCoreRegistrarWithAgentV3(reg: SurfaceRegistrar): Surface
                 value['findings'] as string[]
               );
               return workflowResult('review_run', `System Review verdict ${result.verdict} recorded.`, { verdict: result.verdict });
+            });
+          }
+
+          if (value['action'] === 'control_center') {
+            const startedAt = currentCall()?.startedAt ?? Date.now();
+            return guard('agents', async () => {
+              if (!reg.agentToolsLive) return reg.featureDisabled('Multi-agent mode', 'Multi-agent mode (experimental)');
+              const caller = await callerNowForAgentV3(startedAt, typeof value['run_id'] === 'string' ? value['run_id'] : undefined);
+              const status = await agentSystemStatusForCaller(caller);
+              return workflowResult(
+                'control_center',
+                `Agent System 3.0: ${status.progress.verified}/${status.progress.total} tasks verified; ${status.agents.filter((agent) => agent.active).length} active agent(s).`,
+                status as unknown as Record<string, unknown>
+              );
             });
           }
 
