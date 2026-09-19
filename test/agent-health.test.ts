@@ -11,6 +11,8 @@ function broker(overrides: Partial<AgentInfo> = {}): AgentInfo {
     role: 'worker',
     label: 'Health worker',
     task: 'test health projection',
+    reasoningEffort: null,
+    model: null,
     state: 'active',
     createdAt: NOW - 10_000,
     activatedAt: NOW - 9_000,
